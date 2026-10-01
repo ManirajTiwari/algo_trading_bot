@@ -1,0 +1,14 @@
+﻿@'
+# Virtual Environments
+venv/
+env/
+ENV/
+
+# Python Bytecode / Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables / API keys
+.env
+'@
