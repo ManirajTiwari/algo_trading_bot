@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from analyzer import WATCHLIST, get_watchlist_summary, analyze_ticker
 from visualizer import create_stock_chart
 
@@ -10,43 +11,31 @@ def setup_page():
         initial_sidebar_state="expanded"
     )
     
-    # Custom CSS for dark-themed, sleek dashboard elements
     st.markdown("""
         <style>
-        /* Main background tuning */
-        .main {
-            background-color: #0e1117;
-        }
-        /* Custom card styling for metrics */
+        .main { background-color: #0e1117; }
         div[data-testid="stMetric"] {
             background-color: #1e222d;
             border: 1px solid #2a2e39;
-            padding: 15px 20px;
+            padding: 12px 16px;
             border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
         }
         div[data-testid="stMetric"] label {
             color: #787b86 !important;
-            font-size: 0.85rem !important;
+            font-size: 0.8rem !important;
             font-weight: 600 !important;
             text-transform: uppercase;
         }
         div[data-testid="stMetricValue"] {
             color: #d1d4dc !important;
-            font-size: 1.6rem !important;
+            font-size: 1.3rem !important;
             font-weight: 700 !important;
         }
-        /* Clean table headers */
         div[data-testid="stDataFrame"] {
             border: 1px solid #2a2e39;
             border-radius: 8px;
-            overflow: hidden;
         }
-        /* Remove default gap */
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
+        .block-container { padding-top: 2rem; padding-bottom: 2rem; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -58,85 +47,102 @@ def render_dashboard():
         
         st.markdown("---")
         st.subheader("🎯 Asset Selection")
-        selected_company = st.selectbox(
-            "Select Asset:",
-            options=list(WATCHLIST.keys())
-        )
+        selected_company = st.selectbox("Select Asset:", options=list(WATCHLIST.keys()))
         selected_symbol = WATCHLIST[selected_company]
 
         st.markdown("---")
-        st.markdown("### 📊 Engine Specs")
-        st.info("""
-        - **Strategy:** SMA Crossover (20/50) + RSI (14)
-        - **Data Feed:** YFinance API
-        - **Execution:** Paper / Backtest Mode
-        """)
-        
+        st.subheader("⏱️ Timeframe & Data")
+        selected_period = st.selectbox(
+            "Select Duration:",
+            options=["1mo", "3mo", "6mo", "1y", "2y", "5y"],
+            index=3
+        )
+
+        st.markdown("---")
+        st.subheader("🛠️ Indicator Selection")
+        selected_indicators = st.multiselect(
+            "Choose indicators to analyze:",
+            options=[
+                "SMA 20 & 50",
+                "RSI (14)",
+                "MACD",
+                "Bollinger Bands",
+                "Volume Bars",
+                "VWAP",
+                "Supertrend"
+            ],
+            default=["SMA 20 & 50", "RSI (14)", "MACD", "Volume Bars"]
+        )
+
+        st.markdown("---")
         if st.button("🔄 Force Refresh Data", use_container_width=True):
+            st.cache_data.clear()
             st.rerun()
 
     # --- MAIN CONTENT AREA ---
     st.title("⚡ Algorithmic Trading Analytics Engine")
-    st.caption(f"Real-time Signal Processing & Indicator Deep Dive")
-
-    # High-level System Metrics
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Tracked Assets", f"{len(WATCHLIST)} Tickers")
-    m2.metric("Primary Strategy", "SMA (20/50) + RSI")
-    m3.metric("Engine Status", "Online", delta="Operational", delta_color="normal")
-    m4.metric("Active Ticker", selected_symbol)
-
-    st.markdown("##")
+    st.caption("Detailed Per-Indicator Signal Breakdown")
 
     # SECTION 1: WATCHLIST OVERVIEW
-    st.subheader("📋 Watchlist Signal Matrix")
-    with st.spinner("Fetching market data and processing strategy logic..."):
-        summary_df = get_watchlist_summary()
+    st.subheader(f"📋 Watchlist Multi-Indicator Matrix ({selected_period})")
+    with st.spinner("Processing indicator signals..."):
+        summary_df = get_watchlist_summary(period=selected_period, indicators=selected_indicators)
         
         if not summary_df.empty:
-            # Styled dataframe with full width
             st.dataframe(
                 summary_df,
                 use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Signal": st.column_config.TextColumn(
-                        "Trade Signal",
-                        help="Generated strategy signal",
-                    ),
-                    "Close": st.column_config.NumberColumn(
-                        "Last Price",
-                        format="₹%.2f" if "NSE" in str(WATCHLIST) else "$%.2f"
-                    )
-                }
+                hide_index=True
             )
         else:
             st.warning("No summary data returned from analyzer.")
 
-    st.markdown("##")
+    st.markdown("---")
 
-    # SECTION 2: DEEP DIVE & CHARTS
-    st.subheader(f"🔍 Deep Dive: {selected_company} ({selected_symbol})")
+    # SECTION 2: DEEP DIVE & PER-INDICATOR SIGNALS
+    st.subheader(f"🔍 Deep Dive Signal Breakdown: {selected_company} ({selected_symbol})")
     
-    df_selected = analyze_ticker(selected_symbol)
+    df_selected = analyze_ticker(selected_symbol, period=selected_period, indicators=selected_indicators)
 
     if df_selected is not None and not df_selected.empty:
-        latest_row = df_selected.iloc[-1]
+        latest = df_selected.iloc[-1]
         
-        # Indicator Cards
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Current Close", f"{latest_row['Close']:.2f}")
+        # Dynamic Signal Metric Cards
+        st.markdown("#### **Active Indicator Signals**")
+        metric_cols = st.columns(len(selected_indicators) + 1)
         
-        # Color-coded RSI metric indicator logic
-        rsi_val = latest_row['RSI']
-        rsi_delta = "Overbought (>70)" if rsi_val > 70 else ("Oversold (<30)" if rsi_val < 30 else "Neutral")
-        c2.metric("RSI (14)", f"{rsi_val:.2f}", delta=rsi_delta, delta_color="off" if rsi_delta == "Neutral" else "inverse")
-        
-        c3.metric("SMA 20 (Fast)", f"{latest_row['SMA_20']:.2f}")
-        c4.metric("SMA 50 (Slow)", f"{latest_row['SMA_50']:.2f}")
+        metric_cols[0].metric("Last Price", f"{latest['Close']:.2f}")
 
-        # Plotly Chart Component
-        fig = create_stock_chart(df_selected, selected_company, selected_symbol)
+        col_idx = 1
+        if "SMA 20 & 50" in selected_indicators and pd.notna(latest['SMA_20']):
+            sma_sig = "BUY 🟢" if latest['SMA_20'] > latest['SMA_50'] else "SELL 🔴"
+            metric_cols[col_idx].metric("SMA (20/50)", f"{latest['SMA_20']:.1f}/{latest['SMA_50']:.1f}", delta=sma_sig, delta_color="normal" if "BUY" in sma_sig else "inverse")
+            col_idx += 1
+
+        if "RSI (14)" in selected_indicators and pd.notna(latest['RSI']):
+            rsi_val = latest['RSI']
+            rsi_sig = "SELL 🔴" if rsi_val > 70 else ("BUY 🟢" if rsi_val < 30 else "HOLD 🟡")
+            metric_cols[col_idx].metric("RSI (14)", f"{rsi_val:.2f}", delta=rsi_sig, delta_color="off" if "HOLD" in rsi_sig else ("normal" if "BUY" in rsi_sig else "inverse"))
+            col_idx += 1
+
+        if "MACD" in selected_indicators and 'MACD' in latest and pd.notna(latest['MACD']):
+            macd_sig = "BUY 🟢" if latest['MACD'] > latest['MACD_Signal'] else "SELL 🔴"
+            metric_cols[col_idx].metric("MACD", f"{latest['MACD']:.2f}", delta=macd_sig, delta_color="normal" if "BUY" in macd_sig else "inverse")
+            col_idx += 1
+
+        if "Bollinger Bands" in selected_indicators and 'BB_Upper' in latest and pd.notna(latest['BB_Upper']):
+            bb_sig = "SELL 🔴" if latest['Close'] >= latest['BB_Upper'] else ("BUY 🟢" if latest['Close'] <= latest['BB_Lower'] else "HOLD 🟡")
+            metric_cols[col_idx].metric("Bollinger", f"{latest['Close']:.2f}", delta=bb_sig, delta_color="off" if "HOLD" in bb_sig else ("normal" if "BUY" in bb_sig else "inverse"))
+            col_idx += 1
+
+        if "VWAP" in selected_indicators and 'VWAP' in latest and pd.notna(latest['VWAP']):
+            vwap_sig = "BUY 🟢" if latest['Close'] > latest['VWAP'] else "SELL 🔴"
+            metric_cols[col_idx].metric("VWAP", f"{latest['VWAP']:.2f}", delta=vwap_sig, delta_color="normal" if "BUY" in vwap_sig else "inverse")
+            col_idx += 1
+
+        st.markdown("##")
+        # Render Plotly Chart
+        fig = create_stock_chart(df_selected, selected_company, selected_symbol, selected_indicators)
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     else:
