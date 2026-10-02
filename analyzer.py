@@ -3,19 +3,64 @@ import yfinance as yf
 import ta
 import streamlit as st
 
+# Major Market & Country Index Mappings
+MARKET_DATA = {
+    "India (NSE & BSE)": {
+        "indices": {
+            "Nifty 50": "^NSEI",
+            "Bank Nifty": "^NSEBANK",
+            "BSE Sensex": "^BSESN"
+        },
+        "tickers": [
+            "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
+            "BHARTIARTL.NS", "SBIN.NS", "LTIM.NS", "ITC.NS", "HINDUNILVR.NS",
+            "LT.NS", "AXISBANK.NS", "KOTAKBANK.NS", "M&M.NS", "TATAMOTORS.NS",
+            "SUNPHARMA.NS", "NTPC.NS", "TITAN.NS", "BAJFINANCE.NS", "ULTRACEMCO.NS"
+        ]
+    },
+    "USA (S&P 500 & Nasdaq)": {
+        "indices": {
+            "S&P 500": "^GSPC",
+            "Nasdaq 100": "^IXIC",
+            "Dow Jones": "^DJI"
+        },
+        "tickers": [
+            "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
+            "META", "TSLA", "BRK-B", "LLY", "AVGO",
+            "JPM", "WMT", "V", "MA", "UNH",
+            "PG", "HD", "JNJ", "COST", "ORCL"
+        ]
+    },
+    "UK (FTSE 100)": {
+        "indices": {
+            "FTSE 100": "^FTSE"
+        },
+        "tickers": [
+            "SHEL.L", "AZN.L", "HSBA.L", "ULVR.L", "BP.L",
+            "GSK.L", "RIO.L", "REL.L", "BATS.L", "DIAGEO.L"
+        ]
+    },
+    "Japan (Nikkei 225)": {
+        "indices": {
+            "Nikkei 225": "^N225"
+        },
+        "tickers": [
+            "7203.T", "6758.T", "9984.T", "6861.T", "8306.T",
+            "7751.T", "6501.T", "8035.T", "4063.T", "9983.T"
+        ]
+    }
+}
+
 @st.cache_data(ttl=300)
-def search_ticker_symbol(query: str) -> str:
-    """Attempts to normalize or find a ticker symbol from user search text."""
-    clean_query = query.strip().upper()
-    
-    # Common crypto/forex/stock mapping helper or raw symbol check
-    if clean_query in ["BTC", "BITCOIN"]:
-        return "BTC-USD"
-    if clean_query in ["ETH", "ETHEREUM"]:
-        return "ETH-USD"
-    
-    # If standard ticker format provided (e.g., RELIANCE.NS, AAPL, TSLA)
-    return clean_query
+def resolve_ticker(query: str) -> str:
+    """Formats or resolves user search query into valid Yahoo Finance ticker."""
+    clean = query.strip().upper()
+    if clean in ["BTC", "BITCOIN"]: return "BTC-USD"
+    if clean in ["ETH", "ETHEREUM"]: return "ETH-USD"
+    if clean in ["NIFTY", "NIFTY50", "NIFTY 50"]: return "^NSEI"
+    if clean in ["BANKNIFTY", "BANK NIFTY"]: return "^NSEBANK"
+    if clean in ["SENSEX", "BSE"]: return "^BSESN"
+    return clean
 
 @st.cache_data(ttl=300)
 def analyze_ticker(ticker_symbol, period="1y", interval="1d", initial_capital=100000, indicators=None):
@@ -59,10 +104,9 @@ def analyze_ticker(ticker_symbol, period="1y", interval="1d", initial_capital=10
     if "VWAP" in indicators:
         df['VWAP'] = (df['Volume'] * (df['High'] + df['Low'] + df['Close']) / 3).cumsum() / df['Volume'].cumsum()
 
-    # Base Backtesting Strategy Signal
     df['Signal'] = 0
-    df.loc[(df['SMA_20'] > df['SMA_50']) & (df['RSI'] < 70), 'Signal'] = 1   # BUY
-    df.loc[(df['SMA_20'] < df['SMA_50']) | (df['RSI'] > 70), 'Signal'] = -1  # SELL
+    df.loc[(df['SMA_20'] > df['SMA_50']) & (df['RSI'] < 70), 'Signal'] = 1
+    df.loc[(df['SMA_20'] < df['SMA_50']) | (df['RSI'] > 70), 'Signal'] = -1
 
     df['Pct_Change'] = df['Close'].pct_change()
     df['Strategy_Return'] = df['Signal'].shift(1) * df['Pct_Change']
@@ -71,50 +115,50 @@ def analyze_ticker(ticker_symbol, period="1y", interval="1d", initial_capital=10
 
     return df
 
-def get_single_summary(symbol, period="1y", indicators=None):
+@st.cache_data(ttl=300)
+def get_market_overview(country_key, period="1y", top_n=10, indicators=None):
     if indicators is None:
-        indicators = ["SMA 20 & 50", "RSI (14)", "Volume Bars"]
+        indicators = ["SMA 20 & 50", "RSI (14)"]
 
-    df = analyze_ticker(symbol, period=period, indicators=indicators)
-    if df is None or df.empty:
-        return pd.DataFrame()
+    tickers = MARKET_DATA.get(country_key, {}).get("tickers", [])[:top_n]
+    results = []
 
-    latest = df.iloc[-1]
-    latest_close = float(latest['Close'])
+    for sym in tickers:
+        df = analyze_ticker(sym, period=period, indicators=indicators)
+        if df is not None and not df.empty:
+            latest = df.iloc[-1]
+            first = df.iloc[0]
 
-    row = {
-        "Symbol": symbol,
-        "Price": f"${latest_close:,.2f}" if "USD" in symbol else f"₹{latest_close:,.2f}"
-    }
+            c_latest = float(latest['Close'])
+            c_first = float(first['Close'])
+            pct_change = ((c_latest - c_first) / c_first) * 100
 
-    if "SMA 20 & 50" in indicators and pd.notna(latest['SMA_20']) and pd.notna(latest['SMA_50']):
-        row["SMA Signal"] = "BUY 🟢" if latest['SMA_20'] > latest['SMA_50'] else "SELL 🔴"
+            sma_sig = "BUY 🟢" if pd.notna(latest.get('SMA_20')) and latest['SMA_20'] > latest['SMA_50'] else "SELL 🔴"
+            rsi_sig = "HOLD 🟡"
+            if pd.notna(latest.get('RSI')):
+                rsi_sig = "SELL 🔴 (OB)" if latest['RSI'] > 70 else ("BUY 🟢 (OS)" if latest['RSI'] < 30 else "HOLD 🟡")
 
-    if "RSI (14)" in indicators and pd.notna(latest['RSI']):
-        rsi_val = latest['RSI']
-        if rsi_val > 70:
-            row["RSI Signal"] = "SELL 🔴 (Overbought)"
-        elif rsi_val < 30:
-            row["RSI Signal"] = "BUY 🟢 (Oversold)"
-        else:
-            row["RSI Signal"] = "HOLD 🟡 (Neutral)"
+            results.append({
+                "Symbol": sym,
+                "Price": f"{c_latest:,.2f}",
+                "Period Return (%)": round(pct_change, 2),
+                "SMA Signal": sma_sig,
+                "RSI Signal": rsi_sig,
+                "_raw_return": pct_change
+            })
 
-    if "MACD" in indicators and 'MACD' in df.columns and pd.notna(latest['MACD']):
-        row["MACD Signal"] = "BUY 🟢" if latest['MACD'] > latest['MACD_Signal'] else "SELL 🔴"
+    df_res = pd.DataFrame(results)
+    if df_res.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    if "Bollinger Bands" in indicators and 'BB_Upper' in df.columns and pd.notna(latest['BB_Upper']):
-        if latest['Close'] >= latest['BB_Upper']:
-            row["BB Signal"] = "SELL 🔴 (Overbought)"
-        elif latest['Close'] <= latest['BB_Lower']:
-            row["BB Signal"] = "BUY 🟢 (Oversold)"
-        else:
-            row["BB Signal"] = "HOLD 🟡"
+    index_df = df_res.drop(columns=["_raw_return"]).copy()
+    
+    # Gainers & Losers
+    sorted_df = df_res.sort_values(by="_raw_return", ascending=False)
+    gainers_df = sorted_df.head(top_n).drop(columns=["_raw_return"]).copy()
+    losers_df = df_res.sort_values(by="_raw_return", ascending=True).head(top_n).drop(columns=["_raw_return"]).copy()
 
-    if "VWAP" in indicators and 'VWAP' in df.columns and pd.notna(latest['VWAP']):
-        row["VWAP Signal"] = "BUY 🟢" if latest['Close'] > latest['VWAP'] else "SELL 🔴"
+    # Compounders
+    compounders_df = sorted_df[(sorted_df["_raw_return"] > 0) & (sorted_df["SMA Signal"] == "BUY 🟢")].drop(columns=["_raw_return"]).copy()
 
-    valid_p = df['Portfolio_Value'].dropna()
-    pnl_pct = ((float(valid_p.iloc[-1]) - float(valid_p.iloc[0])) / float(valid_p.iloc[0])) * 100 if not valid_p.empty else 0.0
-    row["Strategy P&L"] = f"{pnl_pct:+.2f}%"
-
-    return pd.DataFrame([row])
+    return index_df, gainers_df, losers_df, compounders_df
